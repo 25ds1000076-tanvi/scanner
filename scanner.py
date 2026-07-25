@@ -4,16 +4,18 @@ from flask import Flask, request, jsonify
 from openai import OpenAI
 
 app = Flask(__name__)
-
-# This automatically picks up the OPENAI_API_KEY from Render's environment variables
 client = OpenAI()
 
-@app.route('/', methods=['POST'])
+# Added 'GET' so you can open the URL in your browser to wake it up!
+@app.route('/', methods=['GET', 'POST'])
 def scan():
-    data = request.json or {}
+    if request.method == 'GET':
+        return "Scanner is awake and ready for the grader!"
+
+    # force=True ignores missing headers, silent=True prevents crashes from bad requests
+    data = request.get_json(force=True, silent=True) or {}
     skill_content = data.get("skill", "")
     
-    # We give the LLM a highly strict prompt so it doesn't over-flag the clean files
     prompt = f"""
     You are a strict and precise security scanner for AI agent skill files (Markdown with YAML frontmatter). 
     Your job is to analyze the file and return exactly which of the following 4 vulnerabilities are present.
@@ -37,13 +39,12 @@ def scan():
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.0, # Zero temperature makes the LLM deterministic and strict
+            temperature=0.0,
             response_format={"type": "json_object"}
         )
         
         result = json.loads(response.choices[0].message.content)
         
-        # Double-check: Ensure only the exact requested strings are returned
         valid_cats = {"hardcoded_secret", "prompt_injection", "excessive_permissions", "unclear_provenance"}
         categories = [c for c in result.get("categories", []) if c in valid_cats]
         
@@ -51,10 +52,8 @@ def scan():
         
     except Exception as e:
         print(f"Error: {e}")
-        # If the API fails, return clean to avoid false-positive penalties
         return jsonify({"categories": []})
 
 if __name__ == '__main__':
-    # Render assigns a dynamic port, so we grab it from the environment
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
